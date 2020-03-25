@@ -6,6 +6,7 @@ metadata = {
 }
 
 # Protocol constants
+USING_THERMOCYCLER = False
 
 # Master mix locations on the eppendorf tube holder
 REAGENT_LOCATIONS = {
@@ -76,11 +77,19 @@ def run(protocol):
             ]
     p20 = protocol.load_instrument('p20_single_gen2', 'right', tip_racks=sample_tip_racks)
 
-    tempdeck = protocol.load_module('tempdeck', '4')
-    tempdeck.set_temperature(4)
-
-    tempplate = tempdeck.load_labware(
-        'opentrons_96_aluminumblock_nest_wellplate_100ul')
+    if USING_THERMOCYCLER:
+        tc = protocol.load_module('thermocycler')
+        if tc.lid_position != 'open':
+            tc.open_lid()
+        tc.set_lid_temperature(105)
+        tc.set_block_temperature(4)
+        tempplate = tc.load_labware(
+            'opentrons_96_aluminumblock_nest_wellplate_100ul')
+    else:
+        tempdeck = protocol.load_module('tempdeck', '4')
+        tempdeck.set_temperature(4)
+        tempplate = tempdeck.load_labware(
+            'opentrons_96_aluminumblock_nest_wellplate_100ul')
 
     tempplate_wells_by_row = list(itertools.chain(*tempplate.rows()))
 
@@ -124,7 +133,7 @@ def run(protocol):
     # which makes it easier because we don't bother optimizing for tip use.
     # Transfers are made row by row, left to right.
 
-    sample_labels =  re.split(r'[\n\t]+', SAMPLE_MAP.strip())
+    sample_labels = re.split(r'[\n\t]+', SAMPLE_MAP.strip())
     sample_wells = zip(sample_labels, tempplate_wells_by_row)
     for sample, dest_well in sample_wells:
         # Determine whether we are dealing with an actual sample, which we
@@ -143,3 +152,18 @@ def run(protocol):
             source_well = reagent_rack[REAGENT_LOCATIONS[sample]]
 
         transfer_with_primitives(p20, source_well, dest_well)
+
+    if USING_THERMOCYCLER:
+        # thermocycler profile
+        p1 = [
+            {'temperature': 20, 'hold_time_minutes': 5},
+            {'temperature': 45, 'hold_time_minutes': 20},
+            {'temperature': 95, 'hold_time_minutes': 2}
+        ]
+        p2 = [
+            {'temperature': 95, 'hold_time_seconds': 30},
+            {'temperature': 63, 'hold_time_seconds': 50}
+        ]
+        tc.close_lid()
+        tc.execute_profile(steps=p1, repetitions=1, block_max_volume=20)
+        tc.execute_profile(steps=p2, repetitions=40, block_max_volume=20)
